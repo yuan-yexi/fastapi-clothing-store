@@ -1,0 +1,3 @@
+docker run --name postgres-13-vol -v ./Documents/volumes/postgres:/var/lib/postgresql/data -p 5432:5432 -d postgres-13
+
+docker start postgres-13-vol
