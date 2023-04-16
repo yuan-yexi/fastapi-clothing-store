@@ -1,9 +1,14 @@
+from datetime import datetime
+from typing import Optional
+
 import databases
 import enum
 import sqlalchemy
 
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
+from email_validator import validate_email, EmailNotValidError
+from passlib.context import CryptContext
 from decouple import config
 
 DATABASE_URL = f"postgresql://{config('DB_USER')}:{config('DB_PASSWORD')}@localhost:54321/clothes"
@@ -66,16 +71,45 @@ clothes = sqlalchemy.Table(
 )
 
 
+class EmailField(str):
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.check_email
+
+    @classmethod
+    def check_email(cls, v) -> str:
+        try:
+            validate_email(v)
+            return v
+        except EmailNotValidError:
+            raise ValueError("Not a valid email address")
+
+
 class BaseUser(BaseModel):
-    email: str
+    email: EmailField
     full_name: str
+
+    @validator("full_name")
+    def check_full_name(cls, v):
+        try:
+            first_name, last_name = v.split()
+            return v
+        except Exception:
+            raise ValueError("Expected first and last name, only received 1 name.")
 
 
 class UserSignIn(BaseUser):
     password: str
 
 
+class UserSignOut(BaseUser):
+    phone: Optional[str]
+    created_at: datetime
+    last_modified_at: datetime
+
+
 app = FastAPI()
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 @app.on_event("startup")
@@ -88,8 +122,10 @@ async def shutdown():
     await database.disconnect()
 
 
-@app.post("/register")
+@app.post("/register", response_model=UserSignOut)
 async def create_user(user: UserSignIn):
-    query = users.insert().values(**user.dict())
-    _id = await database.execute(query)
-    return None
+    user.password = pwd_context.hash(user.password)
+    query = users.insert().values(**user.dict())  # using sqlalchemy to insert new row into table
+    _id = await database.execute(query)  # using database to connect to DB and execute query
+    created_user = await database.fetch_one(users.select().where(users.c.id == _id))
+    return created_user
