@@ -120,6 +120,23 @@ class UserSignOut(BaseUser):
     last_modified_at: datetime
 
 
+class ClothesBase(BaseModel):
+    name: str
+    color: str
+    size: SizeEnum
+    color: ColorEnum
+
+
+class ClothesIn(ClothesBase):
+    pass
+
+
+class ClothesOut(ClothesBase):
+    id: int
+    created_at: datetime
+    last_modified_at: datetime
+
+
 app = FastAPI()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -144,6 +161,12 @@ class CustomHTTPBearer(HTTPBearer):
 oauth_scheme = CustomHTTPBearer()
 
 
+def is_admin(request: Request):
+    user = request.state.user
+    if not user or user["role"] not in (UserRole.admin, UserRole.super_admin):
+        raise HTTPException(403, "You do not have permission for this resource")
+
+
 def create_access_token(user):
     try:
         payload = {"sub": user["id"], "exp": datetime.utcnow() + timedelta(minutes=120)}
@@ -165,6 +188,16 @@ async def shutdown():
 @app.get("/clothes/", dependencies=[Depends(oauth_scheme)])
 async def get_all_clothes():
     return await database.fetch_all(clothes.select())
+
+
+@app.post(
+    "/clothes/",
+    dependencies=[Depends(oauth_scheme), Depends(is_admin)],
+    response_model=ClothesOut, status_code=201
+)
+async def create_clothes(clothes_data: ClothesIn):
+    _id = await database.execute(clothes.insert().values(**clothes_data.dict()))
+    return await database.fetch_one(clothes.select(clothes.c.id == _id))
 
 
 @app.post(
